@@ -1,0 +1,6 @@
+{
+  "name": "DIABDI",
+  "description": "DIABDI - Digitalisasi Informasi Absensi Berbasis Data Indeks Terintegrasi Google Sheets dan Gemini AI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
