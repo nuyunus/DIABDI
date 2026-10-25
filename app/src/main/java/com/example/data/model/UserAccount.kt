@@ -8,11 +8,12 @@ enum class UserRole {
 
     companion object {
         fun fromString(roleStr: String?): UserRole {
-            return when (roleStr?.trim()?.uppercase()) {
-                "SUPER_ADMIN", "SUPERADMIN" -> SUPER_ADMIN
-                "ADMIN" -> ADMIN
-                "GURU", "GURU PIKET" -> GURU
-                "WALI_SANTRI", "SANTRI", "SISWA" -> WALI_SANTRI
+            val s = roleStr?.trim()?.uppercase() ?: return GURU
+            return when {
+                s.contains("SUPER") -> SUPER_ADMIN
+                s.contains("ADMIN") -> ADMIN
+                s.contains("GURU") -> GURU
+                s.contains("WALI") || s.contains("SANTRI") || s.contains("SISWA") -> WALI_SANTRI
                 else -> GURU
             }
         }

@@ -39,6 +39,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -53,9 +55,11 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.AttendanceRecord
 import com.example.data.remote.WhatsAppHelper
 import com.example.ui.SantriViewModel
+import com.example.ui.ScanFeedback
 import com.example.ui.components.ScanResultCard
 import com.example.ui.components.ScannerCameraView
 import com.example.ui.components.SessionSelectorRow
+import com.example.util.AttendanceNotificationHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,10 +77,74 @@ fun ScanScreen(
     val isSyncing by viewModel.isSyncing.collectAsState()
     val feedback by viewModel.scanFeedback.collectAsState()
     val sampleStudents by viewModel.studentsList.collectAsState()
-    val isBypassed by viewModel.isTimeLockBypassed.collectAsState()
 
     val teacherUnitSchedule = viewModel.getCurrentTeacherUnitSchedule()
     val isSessionActive = viewModel.isCurrentSessionActive()
+
+    // Otomatis deteksi & pilih sesi yang sedang aktif saat layar dibuka
+    LaunchedEffect(Unit) {
+        viewModel.autoSelectActiveSession()
+    }
+
+    // Bersihkan feedback saat keluar dari layar scan agar tidak terjadi double notifikasi
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.clearScanFeedback()
+        }
+    }
+
+    // Notifikasi sistem dan Toast saat absensi berhasil atau gagal
+    LaunchedEffect(feedback) {
+        val fb = feedback ?: return@LaunchedEffect
+        when (fb) {
+            is ScanFeedback.Success -> {
+                AttendanceNotificationHelper.showSuccess(
+                    context = context,
+                    studentName = fb.student.name,
+                    studentId = fb.student.id,
+                    sessionName = fb.record.sessionName,
+                    status = fb.record.status
+                )
+            }
+            is ScanFeedback.AlreadyRecorded -> {
+                AttendanceNotificationHelper.showFailure(
+                    context = context,
+                    reason = "Santri sudah tercatat pada sesi ini!",
+                    studentName = fb.student?.name
+                )
+            }
+            is ScanFeedback.NotFound -> {
+                AttendanceNotificationHelper.showFailure(
+                    context = context,
+                    reason = "ID Santri '${fb.rawCode}' tidak ditemukan di database!",
+                    studentName = null
+                )
+            }
+            is ScanFeedback.UnitMismatch -> {
+                AttendanceNotificationHelper.showFailure(
+                    context = context,
+                    reason = fb.message,
+                    studentName = fb.student.name
+                )
+            }
+            is ScanFeedback.SessionLocked -> {
+                AttendanceNotificationHelper.showFailure(
+                    context = context,
+                    reason = fb.message,
+                    studentName = null
+                )
+            }
+            is ScanFeedback.Error -> {
+                AttendanceNotificationHelper.showFailure(
+                    context = context,
+                    reason = fb.message,
+                    studentName = null
+                )
+            }
+        }
+        // Konsumsi feedback agar tidak memicu notifikasi berulang saat berpindah menu
+        viewModel.clearScanFeedback()
+    }
 
     val timeFormat = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.forLanguageTag("id-ID"))
     val todayFormatted = timeFormat.format(Date())
@@ -131,7 +199,7 @@ fun ScanScreen(
                             )
                         }
 
-                        // Cloud Status Indicator (Read-only untuk Guru, sinkronisasi hanya oleh Superadmin)
+                        // Cloud Status Indicator
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (unsyncedCount > 0) Color(0xFFFEF08A) else Color.White.copy(alpha = 0.95f)
@@ -163,11 +231,12 @@ fun ScanScreen(
         item {
             SessionSelectorRow(
                 selectedSession = currentSession,
+                unitSchedule = teacherUnitSchedule,
                 onSessionSelected = { viewModel.selectSession(it) }
             )
         }
 
-        // Session Lock Status & Demo Bypass Toggle
+        // Status Sesi Absensi Terpilih (Kunci Otomatis Jika di Luar Waktu)
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -181,45 +250,34 @@ fun ScanScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = if (isSessionActive) Icons.Default.LockOpen else Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = if (isSessionActive) Color(0xFF16A34A) else Color(0xFFDC2626),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = if (isSessionActive) "SESI AKTIF (Absensi Dibuka)" else "SESI TERKUNCI (Di Luar Jam Sesi)",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = if (isSessionActive) Color(0xFF166534) else Color(0xFF991B1B)
-                            )
-                            Text(
-                                text = "Jadwal: ${currentSession.getEffectiveTimeRange(teacherUnitSchedule)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isSessionActive) Color(0xFF15803D) else Color(0xFFB91C1C)
-                            )
-                        }
-                    }
-
-                    // Tester bypass switch
-                    Column(horizontalAlignment = Alignment.End) {
+                    Icon(
+                        imageVector = if (isSessionActive) Icons.Default.LockOpen else Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = if (isSessionActive) Color(0xFF16A34A) else Color(0xFFDC2626),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
                         Text(
-                            text = "Mode Uji Coba",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF64748B)
+                            text = if (isSessionActive) {
+                                "SESI DIBUKA: ${currentSession.name.uppercase()}"
+                            } else {
+                                "WAKTU ABSEN TERKUNCI: ${currentSession.name.uppercase()}"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isSessionActive) Color(0xFF166534) else Color(0xFF991B1B)
                         )
-                        Switch(
-                            checked = isBypassed,
-                            onCheckedChange = { viewModel.toggleTimeLockBypass() }
+                        Text(
+                            text = if (isSessionActive) {
+                                "Jadwal: ${currentSession.getEffectiveTimeRange(teacherUnitSchedule)} • Kamera siap memindai"
+                            } else {
+                                "Hanya bisa absen di waktu: ${currentSession.getEffectiveTimeRange(teacherUnitSchedule)}"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isSessionActive) Color(0xFF15803D) else Color(0xFFB91C1C)
                         )
                     }
                 }
@@ -228,59 +286,11 @@ fun ScanScreen(
 
         // Scanner Viewfinder
         item {
-            if (!isSessionActive) {
-                // Locked View
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFEE2E2)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(32.dp))
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text(
-                            text = "Absensi ${currentSession.name} Terkunci",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF0F172A)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Absensi hanya dapat dilakukan pada waktu yang telah ditentukan:\n${currentSession.getEffectiveTimeRange(teacherUnitSchedule)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF64748B),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Button(
-                            onClick = { viewModel.toggleTimeLockBypass() },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Buka Kunci untuk Pengujian (Demo Mode)")
-                        }
-                    }
-                }
-            } else {
-                ScannerCameraView(
-                    currentSession = currentSession,
-                    onBarcodeScanned = { code -> viewModel.processBarcode(code) }
-                )
-            }
+            ScannerCameraView(
+                currentSession = currentSession,
+                isSessionActive = isSessionActive,
+                onBarcodeScanned = { code -> viewModel.processBarcode(code) }
+            )
         }
 
         // Live Scan Feedback Banner (Card with WhatsApp Button)
@@ -348,6 +358,25 @@ fun ScanScreen(
                     }
                 )
             }
+        }
+
+        // Footer Copyright
+        item {
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Copyright @ PernahID",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = Color(0xFF94A3B8)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

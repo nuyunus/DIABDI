@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -229,16 +230,35 @@ private fun UnitSchedulesEditorSection(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AccessTime, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Setting Jam Masuk Sekolah per Unit",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Setting Jam Masuk (Sheet 'Settings')",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        viewModel.syncSettingsFromCloud { ok, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Tarik dari Sheet", style = MaterialTheme.typography.labelSmall)
+                }
             }
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Setiap unit (MTs, MA, SMK) memiliki jam masuk yang berbeda:",
+                text = "Tersimpan di Google Sheets sheet 'Settings'. Dikelola oleh Super Admin melalui Web Admin Portal agar tidak hilang saat reset aplikasi:",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline
             )
@@ -374,9 +394,9 @@ private fun SheetsStructureSection(context: Context) {
             Spacer(modifier = Modifier.height(8.dp))
 
             SheetTabInfo(
-                sheetName = "3. Tab: Log_Absensi (Realtime Scan)",
-                columns = listOf("Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Nama Asrama", "Sesi", "Status", "Petugas Scan", "Catatan"),
-                desc = "Log kehadiran real-time berdasarkan scan QR ID santri dari aplikasi Android."
+                sheetName = "3. Tab: Log_Absensi (Realtime Scan Sesuai Sesi)",
+                columns = listOf("Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Subuh", "Masuk Sekolah", "Dzuhur", "Ashar", "Masuk Asrama", "Maghrib", "Isya/KBM", "Petugas"),
+                desc = "Log kehadiran real-time horizontal sesuai struktur resmi. Saat santri absen, otomatis masuk ke kolom masing-masing sesuai sesi/waktu absen mereka."
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -390,9 +410,9 @@ private fun SheetsStructureSection(context: Context) {
             Spacer(modifier = Modifier.height(8.dp))
 
             SheetTabInfo(
-                sheetName = "5. Tab: Setting (7 Sesi & Jam Unit)",
-                columns = listOf("Sholat Subuh", "Masuk Sekolah", "Sholat Dzuhur", "Sholat Ashar", "Masuk Asrama", "Sholat Maghrib", "Sholat Isya/KBM"),
-                desc = "Master 7 sesi absensi harian dan konfigurasi jam sekolah per unit MTs, MA, SMK."
+                sheetName = "5. Tab: Settings (Pengaturan Waktu Masuk Sekolah & Sholat)",
+                columns = listOf("Tipe", "Nama Sesi / Unit", "Jam Mulai", "Jam Selesai", "Toleransi (Menit)", "Keterangan"),
+                desc = "Menyimpan pengaturan jam masuk sekolah (MTs, MA, SMK) dan 7 jadwal sholat/asrama. Dikelola oleh Super Admin melalui Web Admin Portal agar tidak hilang ketika aplikasi Android reset data."
             )
         }
     }
@@ -575,11 +595,14 @@ B: ID
 C: Nama Siswa
 D: Kelas
 E: Unit Pendidikan
-F: Nama Asrama
-G: Sesi (Sholat Subuh, Masuk Sekolah, Sholat Dzuhur, Sholat Ashar, Masuk Asrama, Sholat Maghrib, Sholat Isya/KBM)
-H: Status
-I: Petugas Scan
-J: Catatan
+F: Subuh
+G: Masuk Sekolah
+H: Dzuhur
+I: Ashar
+J: Masuk Asrama
+K: Maghrib
+L: Isya/KBM
+M: Petugas
 
 4. Tab: Rekap
 A: ID
@@ -708,14 +731,14 @@ function doPost(e) {
       return createJsonResponse({ status: "error", message: "Spreadsheet tidak terhubung. Masukkan SPREADSHEET_ID jika standalone." });
     }
 
-    // A. Record Absensi dari Android
+    // A. Record Absensi dari Android (Matriks Horizontal Sesuai Sesi/Waktu)
     if (data.action === "record_attendance") {
       var logSheet = findSheet(ss, LOG_SHEET_NAMES);
       if (!logSheet) {
         logSheet = getOrCreateSheet(
           ss,
           "Log_Absensi",
-          ["Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Nama Asrama", "Sesi", "Status", "Petugas Scan", "Catatan"],
+          ["Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Subuh", "Masuk Sekolah", "Dzuhur", "Ashar", "Masuk Asrama", "Maghrib", "Isya/KBM", "Petugas"],
           []
         );
       }
@@ -724,46 +747,99 @@ function doPost(e) {
       const studentName = String(data.studentName || "").trim();
       const className = String(data.className || "").trim();
       const unitPendidikan = String(data.unitPendidikan || "").trim();
-      const dormitory = String(data.dormitory || "").trim();
       const session = String(data.session || "").trim();
       const date = String(data.date || "").trim();
       const status = String(data.status || "Hadir").trim();
+      const timeStr = String(data.time || "").trim();
       const scannedBy = String(data.scannedBy || "Guru Piket").trim();
-      const notes = String(data.notes || "").trim();
+      const now = new Date();
 
-      // Cek Duplikasi berdasarkan ID santri, tanggal, dan sesi
-      const logValues = logSheet.getDataRange().getValues();
-      for (var i = 1; i < logValues.length; i++) {
-        var rowTimestamp = logValues[i][0];
-        var rowDate = formatDateString(rowTimestamp);
-        var rowId = String(logValues[i][1]).trim();
-        var rowSession = String(logValues[i][6]).trim();
+      const scanTimeRaw = timeStr || Utilities.formatDate(now, "GMT+7", "HH.mm");
+      const scanTime = scanTimeRaw.replace(":", ".");
+      let cellVal = scanTime;
+      if (status && status.toLowerCase() !== "hadir") {
+        cellVal = status;
+        const notes = String(data.notes || "").trim();
+        if (notes) cellVal += " (" + notes + ")";
+      }
 
-        if (rowDate === date && rowId === idSantri && rowSession === session) {
-          return createJsonResponse({
-            status: "already_exists",
-            message: studentName + " (" + idSantri + ") SUDAH TERCATAT di sesi " + session
-          });
+      // Deteksi Kolom Berdasarkan Header Baris 1
+      const headerRow = logSheet.getRange(1, 1, 1, Math.max(logSheet.getLastColumn(), 13)).getValues()[0];
+      const sessionLower = session.toLowerCase();
+      let targetCol = 0;
+      for (let h = 0; h < headerRow.length; h++) {
+        const colTitle = String(headerRow[h]).toLowerCase().trim();
+        if (sessionLower.indexOf("subuh") !== -1 && colTitle.indexOf("subuh") !== -1) { targetCol = h + 1; break; }
+        if (sessionLower.indexOf("sekolah") !== -1 && colTitle.indexOf("sekolah") !== -1) { targetCol = h + 1; break; }
+        if ((sessionLower.indexOf("dzuhur") !== -1 || sessionLower.indexOf("zuhur") !== -1) && (colTitle.indexOf("dzuhur") !== -1 || colTitle.indexOf("zuhur") !== -1)) { targetCol = h + 1; break; }
+        if ((sessionLower.indexOf("ashar") !== -1 || sessionLower.indexOf("asar") !== -1) && (colTitle.indexOf("ashar") !== -1 || colTitle.indexOf("asar") !== -1)) { targetCol = h + 1; break; }
+        if (sessionLower.indexOf("asrama") !== -1 && colTitle.indexOf("asrama") !== -1) { targetCol = h + 1; break; }
+        if ((sessionLower.indexOf("maghrib") !== -1 || sessionLower.indexOf("magrib") !== -1) && (colTitle.indexOf("maghrib") !== -1 || colTitle.indexOf("magrib") !== -1)) { targetCol = h + 1; break; }
+        if ((sessionLower.indexOf("isya") !== -1 || sessionLower.indexOf("kbm") !== -1) && (colTitle.indexOf("isya") !== -1 || colTitle.indexOf("kbm") !== -1)) { targetCol = h + 1; break; }
+      }
+
+      if (targetCol === 0) {
+        if (sessionLower.indexOf("subuh") !== -1) targetCol = 6;
+        else if (sessionLower.indexOf("sekolah") !== -1) targetCol = 7;
+        else if (sessionLower.indexOf("dzuhur") !== -1 || sessionLower.indexOf("zuhur") !== -1) targetCol = 8;
+        else if (sessionLower.indexOf("ashar") !== -1 || sessionLower.indexOf("asar") !== -1) targetCol = 9;
+        else if (sessionLower.indexOf("asrama") !== -1) targetCol = 10;
+        else if (sessionLower.indexOf("maghrib") !== -1 || sessionLower.indexOf("magrib") !== -1) targetCol = 11;
+        else if (sessionLower.indexOf("isya") !== -1 || sessionLower.indexOf("kbm") !== -1) targetCol = 12;
+        else {
+          const mins = now.getHours() * 60 + now.getMinutes();
+          if (mins < 6 * 60) targetCol = 6;
+          else if (mins < 11 * 60 + 30) targetCol = 7;
+          else if (mins < 14 * 60 + 30) targetCol = 8;
+          else if (mins < 16 * 60 + 45) targetCol = 9;
+          else if (mins < 17 * 60 + 45) targetCol = 10;
+          else if (mins < 19 * 60) targetCol = 11;
+          else targetCol = 12;
         }
       }
 
-      const timestamp = new Date();
-      logSheet.appendRow([
-        timestamp,
-        idSantri,
-        studentName,
-        className,
-        unitPendidikan,
-        dormitory,
-        session,
-        status,
-        scannedBy,
-        notes
-      ]);
+      let petugasCol = 13;
+      for (let h = 0; h < headerRow.length; h++) {
+        if (String(headerRow[h]).toLowerCase().indexOf("petugas") !== -1) {
+          petugasCol = h + 1;
+          break;
+        }
+      }
+
+      // Cek Baris Santri pada Tanggal Ini
+      const logValues = logSheet.getDataRange().getValues();
+      let existingRowIndex = -1;
+      for (var i = 1; i < logValues.length; i++) {
+        var rowTimestamp = logValues[i][0];
+        var rowDate = formatDateOnlyString(rowTimestamp);
+        var rowId = String(logValues[i][1]).trim();
+
+        if (rowDate === date && rowId === idSantri) {
+          existingRowIndex = i + 1;
+          break;
+        }
+      }
+
+      if (existingRowIndex > 0) {
+        logSheet.getRange(existingRowIndex, 1).setValue(now);
+        logSheet.getRange(existingRowIndex, targetCol).setValue(cellVal);
+        logSheet.getRange(existingRowIndex, petugasCol).setValue(scannedBy);
+      } else {
+        const totalCols = Math.max(logSheet.getLastColumn(), 13);
+        const newRow = new Array(totalCols).fill("");
+        newRow[0] = now;
+        newRow[1] = idSantri;
+        newRow[2] = studentName;
+        newRow[3] = className;
+        newRow[4] = unitPendidikan;
+        newRow[targetCol - 1] = cellVal;
+        newRow[petugasCol - 1] = scannedBy;
+        logSheet.appendRow(newRow);
+      }
 
       return createJsonResponse({
         status: "success",
-        message: "Absensi " + studentName + " berhasil dicatat.",
+        message: "Absensi " + studentName + " berhasil dicatat ke kolom " + session + ".",
         data: { id: idSantri, session: session, status: status }
       });
     }
@@ -1263,19 +1339,23 @@ function getAllAttendanceLogs() {
   const data = logSheet.getDataRange().getValues();
   const logs = [];
   for (var i = data.length - 1; i >= 1; i--) {
-    var rowId = String(data[i][1] || "").trim();
+    var row = data[i];
+    var rowId = String(row[1] || "").trim();
     if (!rowId) continue;
     logs.push({
-      timestamp: formatDateString(data[i][0]),
+      timestamp: formatDateString(row[0]),
       id: rowId,
-      nama: String(data[i][2] || ""),
-      kelas: String(data[i][3] || ""),
-      unit: String(data[i][4] || ""),
-      asrama: String(data[i][5] || ""),
-      sesi: String(data[i][6] || ""),
-      status: String(data[i][7] || "Hadir"),
-      petugas: String(data[i][8] || ""),
-      catatan: String(data[i][9] || "")
+      nama: String(row[2] || ""),
+      kelas: String(row[3] || ""),
+      unit: String(row[4] || ""),
+      subuh: String(row[5] || ""),
+      sekolah: String(row[6] || ""),
+      dzuhur: String(row[7] || ""),
+      ashar: String(row[8] || ""),
+      masukAsrama: String(row[9] || ""),
+      maghrib: String(row[10] || ""),
+      isya: String(row[11] || ""),
+      petugas: String(row[12] || "")
     });
     if (logs.length >= 250) break;
   }
@@ -1294,7 +1374,7 @@ function handleRecordAttendance(data) {
       logSheet = getOrCreateSheet(
         ss,
         "Log_Absensi",
-        ["Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Nama Asrama", "Sesi", "Status", "Petugas Scan", "Catatan"],
+        ["Timestamp", "ID", "Nama Siswa", "Kelas", "Unit Pendidikan", "Subuh", "Masuk Sekolah", "Dzuhur", "Ashar", "Masuk Asrama", "Maghrib", "Isya/KBM", "Petugas"],
         []
       );
     }
@@ -1303,46 +1383,73 @@ function handleRecordAttendance(data) {
     const studentName = String(data.studentName || "").trim();
     const className = String(data.className || "").trim();
     const unitPendidikan = String(data.unitPendidikan || "").trim();
-    const dormitory = String(data.dormitory || "").trim();
     const session = String(data.session || "").trim();
     const date = String(data.date || "").trim();
     const status = String(data.status || "Hadir").trim();
+    const timeStr = String(data.time || "").trim();
     const scannedBy = String(data.scannedBy || "Guru Piket").trim();
-    const notes = String(data.notes || "").trim();
+    const now = new Date();
 
-    // Cek duplikasi
+    const scanTimeRaw = timeStr || Utilities.formatDate(now, "GMT+7", "HH.mm");
+    const scanTime = scanTimeRaw.replace(":", ".");
+    const cellVal = scanTime;
+
+    const sessionLower = session.toLowerCase();
+    let targetCol = 0;
+    if (sessionLower.indexOf("subuh") !== -1) targetCol = 6;
+    else if (sessionLower.indexOf("sekolah") !== -1) targetCol = 7;
+    else if (sessionLower.indexOf("dzuhur") !== -1 || sessionLower.indexOf("zuhur") !== -1) targetCol = 8;
+    else if (sessionLower.indexOf("ashar") !== -1 || sessionLower.indexOf("asar") !== -1) targetCol = 9;
+    else if (sessionLower.indexOf("asrama") !== -1) targetCol = 10;
+    else if (sessionLower.indexOf("maghrib") !== -1 || sessionLower.indexOf("magrib") !== -1) targetCol = 11;
+    else if (sessionLower.indexOf("isya") !== -1 || sessionLower.indexOf("kbm") !== -1) targetCol = 12;
+    else {
+      const mins = now.getHours() * 60 + now.getMinutes();
+      if (mins < 6 * 60) targetCol = 6;
+      else if (mins < 11 * 60 + 30) targetCol = 7;
+      else if (mins < 14 * 60 + 30) targetCol = 8;
+      else if (mins < 16 * 60 + 45) targetCol = 9;
+      else if (mins < 17 * 60 + 45) targetCol = 10;
+      else if (mins < 19 * 60) targetCol = 11;
+      else targetCol = 12;
+    }
+
     const logValues = logSheet.getDataRange().getValues();
+    let existingRowIndex = -1;
     for (var i = 1; i < logValues.length; i++) {
       var rowTimestamp = logValues[i][0];
       var rowDate = formatDateString(rowTimestamp);
       var rowId = String(logValues[i][1]).trim();
-      var rowSession = String(logValues[i][6]).trim();
+      if (rowDate === date && rowId === idSantri) {
+        existingRowIndex = i + 1;
+        break;
+      }
+    }
 
-      if (rowDate === date && rowId === idSantri && rowSession === session) {
+    if (existingRowIndex > 0) {
+      const currentVal = logSheet.getRange(existingRowIndex, targetCol).getValue();
+      if (currentVal && String(currentVal).trim() !== "") {
         return createJsonResponse({
           status: "already_exists",
           message: studentName + " (" + idSantri + ") SUDAH TERCATAT di sesi " + session
         });
       }
-    }
 
-    const timestamp = new Date();
-    logSheet.appendRow([
-      timestamp,
-      idSantri,
-      studentName,
-      className,
-      unitPendidikan,
-      dormitory,
-      session,
-      status,
-      scannedBy,
-      notes
-    ]);
+      logSheet.getRange(existingRowIndex, 1).setValue(now);
+      logSheet.getRange(existingRowIndex, targetCol).setValue(cellVal);
+      logSheet.getRange(existingRowIndex, 13).setValue(scannedBy);
+    } else {
+      const newRow = [
+        now, idSantri, studentName, className, unitPendidikan,
+        "", "", "", "", "", "", "", scannedBy
+      ];
+      newRow[targetCol - 1] = cellVal;
+      logSheet.appendRow(newRow);
+    }
 
     return createJsonResponse({
       status: "success",
-      message: "Absensi " + studentName + " berhasil dicatat.",
+      message: "Absensi " + studentName + " berhasil dicatat ke kolom " + session + ".",
       data: { id: idSantri, session: session, status: status }
     });
   } catch (err) {
@@ -1385,6 +1492,17 @@ function formatDateString(val) {
     return Utilities.formatDate(val, "GMT+7", "yyyy-MM-dd HH:mm");
   }
   return String(val);
+}
+
+function formatDateOnlyString(val) {
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, "GMT+7", "yyyy-MM-dd");
+  }
+  var s = String(val || "").trim();
+  if (s.length >= 10 && s.charAt(4) === '-' && s.charAt(7) === '-') {
+    return s.substring(0, 10);
+  }
+  return s;
 }
 
 function createJsonResponse(data) {

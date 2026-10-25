@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.HomeWork
 import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
@@ -44,12 +46,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AttendanceSession
+import com.example.data.model.UnitSchedule
 
 @Composable
 fun SessionSelectorRow(
     selectedSession: AttendanceSession,
     onSessionSelected: (AttendanceSession) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    unitSchedule: UnitSchedule? = null
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -72,7 +76,7 @@ fun SessionSelectorRow(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = selectedSession.timeRange,
+                    text = selectedSession.getEffectiveTimeRange(unitSchedule),
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = selectedSession.accentColor
@@ -89,9 +93,12 @@ fun SessionSelectorRow(
         ) {
             items(AttendanceSession.ALL_SESSIONS) { session ->
                 val isSelected = session.id == selectedSession.id
+                val isActive = session.isCurrentlyActive(unitSchedule, ignoreTimeLock = false)
                 SessionChip(
                     session = session,
                     isSelected = isSelected,
+                    isActive = isActive,
+                    unitSchedule = unitSchedule,
                     onClick = { onSessionSelected(session) }
                 )
             }
@@ -103,6 +110,8 @@ fun SessionSelectorRow(
 private fun SessionChip(
     session: AttendanceSession,
     isSelected: Boolean,
+    isActive: Boolean,
+    unitSchedule: UnitSchedule?,
     onClick: () -> Unit
 ) {
     val icon = when (session.id) {
@@ -153,15 +162,29 @@ private fun SessionChip(
             Spacer(modifier = Modifier.width(8.dp))
 
             Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${session.id}. ${session.name}",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isActive) Color(0xFFDCFCE7) else Color(0xFFF1F5F9)
+                    ) {
+                        Text(
+                            text = if (isActive) "Buka" else "Kunci",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (isActive) Color(0xFF16A34A) else Color(0xFF64748B),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
                 Text(
-                    text = "${session.id}. ${session.name}",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                    ),
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = session.timeRange,
+                    text = session.getEffectiveTimeRange(unitSchedule),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                 )

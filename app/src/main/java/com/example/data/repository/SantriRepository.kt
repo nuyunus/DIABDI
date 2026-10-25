@@ -6,6 +6,7 @@ import com.example.data.local.InitialData
 import com.example.data.local.StudentDao
 import com.example.data.model.AttendanceRecord
 import com.example.data.model.AttendanceSession
+import com.example.data.model.AttendanceSessionSetting
 import com.example.data.model.Student
 import com.example.data.model.UnitSchedule
 import com.example.data.model.UserAccount
@@ -63,6 +64,10 @@ class SantriRepository(
         return studentDao.getStudentsByUnit(unit)
     }
 
+    fun searchStudentsByUnit(query: String, unit: String): Flow<List<Student>> {
+        return studentDao.searchStudentsByUnit(query, unit)
+    }
+
     suspend fun findStudentByQrId(rawQr: String): Student? {
         val clean = rawQr.trim()
         val id = if (clean.startsWith("ID:")) {
@@ -111,10 +116,11 @@ class SantriRepository(
         student: Student,
         session: AttendanceSession,
         status: String = "Hadir",
-        scannedBy: String = "Guru Piket"
+        scannedBy: String = "Guru Piket",
+        notes: String = ""
     ): Result<AttendanceRecord> = withContext(Dispatchers.IO) {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+        val timeFormat = SimpleDateFormat("HH.mm", Locale.US)
         val now = Date()
         val todayStr = dateFormat.format(now)
         val timeStr = timeFormat.format(now)
@@ -139,6 +145,7 @@ class SantriRepository(
             timestamp = now.time,
             status = status,
             scannedBy = scannedBy,
+            notes = notes,
             isSynced = false,
             parentPhone = student.parentPhone
         )
@@ -157,6 +164,61 @@ class SantriRepository(
         }
     }
 
+    suspend fun recordBulkManualAttendance(
+        students: List<Student>,
+        session: AttendanceSession,
+        status: String,
+        notes: String,
+        scannedBy: String
+    ): Triple<Int, Int, List<String>> = withContext(Dispatchers.IO) {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val timeFormat = SimpleDateFormat("HH.mm", Locale.US)
+        val now = Date()
+        val todayStr = dateFormat.format(now)
+        val timeStr = timeFormat.format(now)
+
+        var successCount = 0
+        var failCount = 0
+        val messages = mutableListOf<String>()
+
+        for (student in students) {
+            try {
+                val existing = attendanceDao.getRecordForStudentSession(student.id, session.name, todayStr)
+                val targetId = existing?.id ?: 0L
+                val record = AttendanceRecord(
+                    id = targetId,
+                    studentId = student.id,
+                    studentName = student.name,
+                    className = student.className,
+                    unitPendidikan = student.unitPendidikan,
+                    dormitory = student.dormitory,
+                    sessionName = session.name,
+                    date = todayStr,
+                    time = existing?.time ?: timeStr,
+                    timestamp = now.time,
+                    status = status,
+                    scannedBy = scannedBy,
+                    notes = notes,
+                    isSynced = false,
+                    parentPhone = student.parentPhone
+                )
+
+                val savedId = attendanceDao.insertRecord(record)
+                val (syncOk, syncMsg) = sheetsService.syncAttendance(record.copy(id = savedId))
+                if (syncOk) {
+                    attendanceDao.markAsSynced(savedId)
+                } else {
+                    attendanceDao.markSyncFailed(savedId, syncMsg)
+                }
+                successCount++
+            } catch (e: Exception) {
+                failCount++
+                messages.add("${student.name}: ${e.message}")
+            }
+        }
+        Triple(successCount, failCount, messages)
+    }
+
     suspend fun syncAllPending(): Int = withContext(Dispatchers.IO) {
         val unsynced = attendanceDao.getUnsyncedRecords()
         var successCount = 0
@@ -172,15 +234,17 @@ class SantriRepository(
         successCount
     }
 
+    suspend fun getStudentCountDirect(): Int = studentDao.getStudentCountDirect()
+
     /**
      * Menghubungkan langsung ke database Google Sheets dan mengunduh data santri riil
      */
     suspend fun pullStudentsFromSheets(): Result<Int> = withContext(Dispatchers.IO) {
         val result = sheetsService.fetchStudentsFromSheets()
         result.map { remoteStudents ->
-            // Bersihkan seluruh data dummy / santri lokal lama sehingga murni hanya data asli dari Google Sheets
-            studentDao.deleteAllStudents()
+            // Bersihkan data lama hanya jika data baru berhasil diperoleh dari Google Sheets
             if (remoteStudents.isNotEmpty()) {
+                studentDao.deleteAllStudents()
                 studentDao.insertStudents(remoteStudents)
             }
             // Sekaligus sinkronkan daftar users dari sheet Users
@@ -223,7 +287,7 @@ class SantriRepository(
                         password = obj.optString("password", "123"),
                         displayName = obj.optString("displayName", obj.getString("username")),
                         role = role,
-                        unitPendidikan = obj.optString("unitPendidikan", null).takeIf { !it.isNullOrBlank() }
+                        unitPendidikan = obj.optString("unitPendidikan", "").takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -248,6 +312,44 @@ class SantriRepository(
             }
             userPrefs.edit().putString("users_list_json", arr.toString()).apply()
         } catch (_: Exception) {}
+    }
+
+    fun getLoggedInUser(): UserAccount? {
+        val jsonStr = userPrefs.getString("logged_in_user_json", null) ?: return null
+        return try {
+            val obj = JSONObject(jsonStr)
+            val role = com.example.data.model.UserRole.fromString(obj.optString("role", "GURU"))
+            UserAccount(
+                username = obj.getString("username"),
+                password = obj.optString("password", "123"),
+                displayName = obj.optString("displayName", obj.getString("username")),
+                role = role,
+                unitPendidikan = obj.optString("unitPendidikan", "").takeIf { it.isNotBlank() },
+                studentId = obj.optString("studentId", "").takeIf { it.isNotBlank() }
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveLoggedInUser(user: UserAccount?) {
+        if (user == null) {
+            userPrefs.edit().remove("logged_in_user_json").apply()
+        } else {
+            val obj = JSONObject().apply {
+                put("username", user.username)
+                put("password", user.password)
+                put("displayName", user.displayName)
+                put("role", user.role.name)
+                put("unitPendidikan", user.unitPendidikan ?: "")
+                put("studentId", user.studentId ?: "")
+            }
+            userPrefs.edit().putString("logged_in_user_json", obj.toString()).apply()
+        }
+    }
+
+    fun clearLoggedInUser() {
+        userPrefs.edit().remove("logged_in_user_json").apply()
     }
 
     suspend fun insertStudent(student: Student) {
@@ -299,6 +401,51 @@ class SantriRepository(
         }
         schedulePrefs.edit().putString("unit_schedules_json", jsonArray.toString()).apply()
     }
+
+    fun saveSessionSettings(sessions: List<AttendanceSessionSetting>) {
+        val jsonArray = JSONArray()
+        for (item in sessions) {
+            val obj = JSONObject().apply {
+                put("name", item.name)
+                put("start", item.start)
+                put("end", item.end)
+                put("toleransi", item.toleransi)
+                put("keterangan", item.keterangan)
+            }
+            jsonArray.put(obj)
+        }
+        schedulePrefs.edit().putString("sessions_settings_json", jsonArray.toString()).apply()
+    }
+
+    fun getSessionSettings(): List<AttendanceSessionSetting> {
+        val jsonStr = schedulePrefs.getString("sessions_settings_json", null) ?: return emptyList()
+        return try {
+            val jsonArray = JSONArray(jsonStr)
+            val list = mutableListOf<AttendanceSessionSetting>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(
+                    AttendanceSessionSetting(
+                        name = obj.getString("name"),
+                        start = obj.getString("start"),
+                        end = obj.getString("end"),
+                        toleransi = obj.optInt("toleransi", 0),
+                        keterangan = obj.optString("keterangan", "")
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchSettingsFromCloud() = sheetsService.fetchSettings()
+
+    suspend fun saveSettingsToCloud(
+        unitSchedules: List<UnitSchedule>,
+        sessions: List<AttendanceSessionSetting> = emptyList()
+    ): Pair<Boolean, String> = sheetsService.saveSettingsToCloud(unitSchedules, sessions)
 
     suspend fun initializeDatabase() = withContext(Dispatchers.IO) {
         // Hapus data dummy: jika script URL sudah terkonfigurasi, langsung sinkronkan santri & users dari Google Sheets

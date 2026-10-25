@@ -25,8 +25,11 @@ interface StudentDao {
     @Query("SELECT * FROM students WHERE id = :searchKey OR nisn = :searchKey LIMIT 1")
     suspend fun findByIdOrNisn(searchKey: String): Student?
 
-    @Query("SELECT * FROM students WHERE unitPendidikan = :unit ORDER BY name ASC")
+    @Query("SELECT * FROM students WHERE TRIM(UPPER(unitPendidikan)) = TRIM(UPPER(:unit)) ORDER BY name ASC")
     fun getStudentsByUnit(unit: String): Flow<List<Student>>
+
+    @Query("SELECT * FROM students WHERE TRIM(UPPER(unitPendidikan)) = TRIM(UPPER(:unit)) AND (name LIKE '%' || :query || '%' OR id LIKE '%' || :query || '%' OR nisn LIKE '%' || :query || '%' OR className LIKE '%' || :query || '%') ORDER BY name ASC")
+    fun searchStudentsByUnit(query: String, unit: String): Flow<List<Student>>
 
     @Query("SELECT * FROM students WHERE name LIKE '%' || :query || '%' OR id LIKE '%' || :query || '%' OR nisn LIKE '%' || :query || '%' OR className LIKE '%' || :query || '%' ORDER BY name ASC")
     fun searchStudents(query: String): Flow<List<Student>>

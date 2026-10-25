@@ -379,6 +379,25 @@ fun ParentHomeScreen(
                 }
             }
         }
+
+        // Footer Copyright
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Copyright @ PernahID",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = Color(0xFF94A3B8)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 
     if (showQrDialog && childStudent != null) {

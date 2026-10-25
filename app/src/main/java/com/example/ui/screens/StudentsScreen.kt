@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.model.Student
 import com.example.ui.SantriViewModel
 import com.example.ui.components.QrCardDialog
@@ -63,9 +64,10 @@ fun StudentsScreen(
     val students by viewModel.studentsList.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val isPulling by viewModel.isPulling.collectAsState()
+    val pullResult by viewModel.pullResult.collectAsState()
 
     var selectedStudentForQr by remember { mutableStateOf<Student?>(null) }
-    var isRefreshing by remember { mutableStateOf(false) }
 
     Scaffold(
         // Tidak ada FloatingActionButton tambah siswa per revisi
@@ -125,12 +127,112 @@ fun StudentsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
+                if (students.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudDownload,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) "Santri Tidak Ditemukan" else "Data Santri Belum Dimuat",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) {
+                                        "Tidak ada santri yang cocok dengan kata kunci '$searchQuery'."
+                                    } else {
+                                        "Daftar santri untuk unit ${currentUser?.unitPendidikan ?: "ini"} belum terunduh dari Google Sheets. Pastikan koneksi internet terhubung lalu klik tombol di bawah."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = { viewModel.pullStudentsFromSheets() },
+                                    enabled = !isPulling,
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    if (isPulling) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Mengunduh...")
+                                    } else {
+                                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Tarik Data dari Google Sheets")
+                                    }
+                                }
+                                if (pullResult != null) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = pullResult!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (pullResult!!.contains("Berhasil")) Color(0xFF16A34A) else Color(0xFFDC2626),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 items(students, key = { it.id }) { student ->
                     StudentItemCard(
                         student = student,
                         onShowQr = { selectedStudentForQr = student },
                         onEvaluateAi = { onNavigateToAi(student) }
                     )
+                }
+
+                // Footer Copyright
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Copyright @ PernahID",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }

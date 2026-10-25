@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,11 +76,13 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import java.nio.ByteBuffer
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 @Composable
 fun ScannerCameraView(
     currentSession: AttendanceSession,
+    isSessionActive: Boolean = true,
     onBarcodeScanned: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -98,6 +103,22 @@ fun ScannerCameraView(
 
     var isTorchOn by remember { mutableStateOf(false) }
     var cameraControl: Camera? by remember { mutableStateOf(null) }
+    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    var cameraExecutorRef by remember { mutableStateOf<ExecutorService?>(null) }
+
+    // Bersihkan camera dan background executor saat composable dihancurkan / pindah menu
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                cameraProviderRef?.unbindAll()
+            } catch (_: Exception) {}
+            try {
+                cameraExecutorRef?.shutdownNow()
+            } catch (_: Exception) {}
+            lastScannedCode = ""
+            lastScanTime = 0L
+        }
+    }
 
     // Scan line animation
     val infiniteTransition = rememberInfiniteTransition(label = "scan_beam")
@@ -145,9 +166,12 @@ fun ScannerCameraView(
 
                             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                             val cameraExecutor = Executors.newSingleThreadExecutor()
+                            cameraExecutorRef = cameraExecutor
 
                             cameraProviderFuture.addListener({
                                 val cameraProvider = cameraProviderFuture.get()
+                                cameraProviderRef = cameraProvider
+
                                 val preview = Preview.Builder().build().also {
                                     it.surfaceProvider = previewView.surfaceProvider
                                 }
@@ -157,8 +181,14 @@ fun ScannerCameraView(
                                     .build()
                                     .also { analysis ->
                                         analysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                                            if (!isSessionActive) {
+                                                imageProxy.close()
+                                                return@setAnalyzer
+                                            }
                                             decodeBarcode(imageProxy) { qrResult ->
-                                                onBarcodeScanned(qrResult)
+                                                if (isSessionActive) {
+                                                    onBarcodeScanned(qrResult)
+                                                }
                                             }
                                         }
                                     }
@@ -209,20 +239,63 @@ fun ScannerCameraView(
                     }
                 }
 
-                // Scanning HUD Overlay with brackets
-                Box(
-                    modifier = Modifier
-                        .size(220.dp)
-                        .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
-                ) {
-                    // Scanning line beam
+                // Scanning HUD Overlay with brackets or Locked Screen
+                if (isSessionActive) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .offset(y = scanLineOffset.dp)
-                            .background(MaterialTheme.colorScheme.primary)
-                    )
+                            .size(220.dp)
+                            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+                    ) {
+                        // Scanning line beam
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .offset(y = scanLineOffset.dp)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                } else {
+                    // TAMPILAN TERKUNCI (Hanya bisa absen di waktu yang telah ditentukan)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.85f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEF4444).copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Terkunci",
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "WAKTU ABSEN TERKUNCI",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sesi ${currentSession.name} saat ini tidak aktif.\nSantri hanya bisa absen pada rentang waktu yang telah ditentukan.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFCBD5E1),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
 
                 // Top Controls on Viewfinder
@@ -243,14 +316,14 @@ fun ScannerCameraView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.QrCodeScanner,
+                                imageVector = if (isSessionActive) Icons.Default.QrCodeScanner else Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = Color(0xFF4ADE80),
+                                tint = if (isSessionActive) Color(0xFF4ADE80) else Color(0xFFF87171),
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "HANYA SCAN QR (ID SANTRI)",
+                                text = if (isSessionActive) "HANYA SCAN QR (ID SANTRI)" else "SCANNER TERKUNCI",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 0.5.sp
@@ -260,7 +333,7 @@ fun ScannerCameraView(
                         }
                     }
 
-                    if (hasCameraPermission && cameraControl != null) {
+                    if (hasCameraPermission && cameraControl != null && isSessionActive) {
                         IconButton(
                             onClick = {
                                 isTorchOn = !isTorchOn

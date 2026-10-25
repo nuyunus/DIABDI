@@ -32,6 +32,19 @@ data class UnitSchedule(
     }
 }
 
+data class AttendanceSessionSetting(
+    val name: String,
+    val start: String,
+    val end: String,
+    val toleransi: Int = 0,
+    val keterangan: String = ""
+)
+
+data class CloudSettingsPayload(
+    val unitSchedules: List<UnitSchedule>,
+    val sessions: List<AttendanceSessionSetting>
+)
+
 data class AttendanceSession(
     val id: Int,
     val name: String,
@@ -68,6 +81,23 @@ data class AttendanceSession(
         } else {
             timeRange
         }
+    }
+
+    fun updateFromTimes(start: String, end: String): AttendanceSession {
+        val startParts = start.replace(".", ":").split(":")
+        val sh = startParts.getOrNull(0)?.toIntOrNull() ?: startHour
+        val sm = startParts.getOrNull(1)?.toIntOrNull() ?: startMinute
+        val endParts = end.replace(".", ":").split(":")
+        val eh = endParts.getOrNull(0)?.toIntOrNull() ?: endHour
+        val em = endParts.getOrNull(1)?.toIntOrNull() ?: endMinute
+        val newRange = if (id == 2) "Sesuai Jadwal Unit" else String.format("%02d:%02d - %02d:%02d WIB", sh, sm, eh, em)
+        return copy(
+            startHour = sh,
+            startMinute = sm,
+            endHour = eh,
+            endMinute = em,
+            timeRange = newRange
+        )
     }
 
     companion object {
@@ -182,6 +212,12 @@ data class AttendanceSession(
             )
         )
 
-        fun defaultSession(): AttendanceSession = ALL_SESSIONS[0]
+        fun findActiveSession(unitSchedule: UnitSchedule? = null): AttendanceSession? {
+            return ALL_SESSIONS.find { it.isCurrentlyActive(unitSchedule, ignoreTimeLock = false) }
+        }
+
+        fun defaultSession(unitSchedule: UnitSchedule? = null): AttendanceSession {
+            return findActiveSession(unitSchedule) ?: ALL_SESSIONS[0]
+        }
     }
 }

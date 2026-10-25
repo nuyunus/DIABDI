@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AssignmentTurnedIn
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,14 +42,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.UserRole
+import com.example.data.remote.GoogleSheetsSyncService
 import com.example.ui.SantriViewModel
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.ui.screens.LoginScreen
+import com.example.ui.screens.ManualAttendanceScreen
 import com.example.ui.screens.ParentHomeScreen
 import com.example.ui.screens.ScanScreen
 import com.example.ui.screens.SplashScreen
@@ -74,6 +81,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RootAppNavigation(viewModel: SantriViewModel) {
+    val context = LocalContext.current
     var showSplash by rememberSaveable { mutableStateOf(true) }
 
     if (showSplash) {
@@ -144,7 +152,7 @@ fun RootAppNavigation(viewModel: SantriViewModel) {
         }
 
         UserRole.GURU -> {
-            // Versi Mobile Khusus Guru Piket (Presensi Scan QR & Data Santri Unit)
+            // Versi Mobile Khusus Guru Piket (Presensi Scan QR, Absensi Manual & Data Santri Unit)
             var currentGuruTab by remember { mutableIntStateOf(0) }
 
             Scaffold(
@@ -179,6 +187,20 @@ fun RootAppNavigation(viewModel: SantriViewModel) {
                             }
                         },
                         actions = {
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(GoogleSheetsSyncService.VERCEL_WEB_APP_URL))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInBrowser,
+                                    contentDescription = "Buka Web Apps Vercel",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             IconButton(onClick = { viewModel.logout() }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ExitToApp,
@@ -209,6 +231,17 @@ fun RootAppNavigation(viewModel: SantriViewModel) {
                         NavigationBarItem(
                             selected = currentGuruTab == 1,
                             onClick = { currentGuruTab = 1 },
+                            icon = { Icon(Icons.Default.AssignmentTurnedIn, contentDescription = "Absen Manual") },
+                            label = { Text("Absen Manual") },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                        NavigationBarItem(
+                            selected = currentGuruTab == 2,
+                            onClick = { currentGuruTab = 2 },
                             icon = { Icon(Icons.Default.People, contentDescription = "Santri") },
                             label = { Text("Data Santri") },
                             colors = NavigationBarItemDefaults.colors(
@@ -224,7 +257,8 @@ fun RootAppNavigation(viewModel: SantriViewModel) {
                 val modifier = Modifier.padding(padding)
                 when (currentGuruTab) {
                     0 -> ScanScreen(viewModel = viewModel, modifier = modifier)
-                    1 -> StudentsScreen(
+                    1 -> ManualAttendanceScreen(viewModel = viewModel, modifier = modifier)
+                    2 -> StudentsScreen(
                         viewModel = viewModel,
                         onNavigateToAi = { student ->
                             viewModel.selectStudentForAi(student)

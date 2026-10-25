@@ -69,6 +69,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.remote.GoogleSheetsSyncService
 import com.example.ui.SantriViewModel
 
 /**
@@ -475,55 +476,60 @@ fun UnitAdminScreen(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        if (scriptUrl.isNotBlank()) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(scriptUrl))
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {
-                                        Toast.makeText(context, "Tidak dapat membuka browser", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Buka Web Admin di Browser")
-                            }
+                        val webUrl = GoogleSheetsSyncService.VERCEL_WEB_APP_URL
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Tidak dapat membuka browser", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Buka Web Apps Absensi (Vercel)")
+                        }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                            OutlinedButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Web Admin URL", scriptUrl))
-                                    Toast.makeText(context, "Link Web Admin disalin!", Toast.LENGTH_SHORT).show()
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Salin URL Web Admin")
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFFFEF3C7),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "URL Web Admin belum dikonfigurasi. Hubungi Super Admin untuk menyambungkan Google Sheets.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF92400E),
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Vercel Web App URL", webUrl))
+                                Toast.makeText(context, "Link Web Apps Vercel disalin!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Salin Link Web Apps (Vercel)")
                         }
                     }
                 }
+            }
+
+            // Footer Copyright
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Copyright @ PernahID",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +70,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.remote.GoogleSheetsSyncService
 import com.example.ui.SantriViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -300,52 +302,38 @@ fun SuperAdminDashboardScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        if (scriptUrl.isNotBlank()) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(scriptUrl))
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {
-                                        Toast.makeText(context, "Tidak dapat membuka browser", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Buka Web Admin di Browser")
-                            }
+                        val vercelUrl = GoogleSheetsSyncService.VERCEL_WEB_APP_URL
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(vercelUrl))
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Tidak dapat membuka browser", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Buka Web Apps Absensi (Vercel)")
+                        }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                            OutlinedButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Web Admin URL", scriptUrl))
-                                    Toast.makeText(context, "Link Web Admin disalin!", Toast.LENGTH_SHORT).show()
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Salin Link Web Admin")
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFFFEF3C7),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Simpan URL Google Apps Script di bawah terlebih dahulu untuk mengaktifkan link Web Admin.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF92400E),
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Vercel Web App URL", vercelUrl))
+                                Toast.makeText(context, "Link Web Apps Vercel disalin!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Salin Link Web Apps (Vercel)")
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -603,16 +591,52 @@ fun SuperAdminDashboardScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(18.dp)) {
-                        Text(
-                            text = "⏱️ Pengaturan Jam Masuk Unit Sekolah",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "Pengaturan batas jam masuk dan toleransi untuk masing-masing unit:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF64748B)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "⏱️ Pengaturan Waktu Masuk Unit Sekolah",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Tersimpan terpusat di Sheet 'Settings' & Web Admin Superadmin:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.syncSettingsFromCloud { ok, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Tarik dari Sheet", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFEFF6FF),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "💡 Info: Jam sekolah dan sholat kini tersimpan terpusat di Google Spreadsheet sheet 'Settings'. Ketika aplikasi di-reset atau ganti device, jam otomatis tersinkron dari cloud.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF1E40AF),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(14.dp))
 
@@ -648,13 +672,15 @@ fun SuperAdminDashboardScreen(
                                                     masukStart = startVal,
                                                     masukEnd = endVal,
                                                     toleransi = tolVal.toIntOrNull() ?: 10
-                                                )
+                                                ) { ok, msg ->
+                                                    Toast.makeText(context, "Unit $unitName tersimpan ke lokal & Sheet Settings!", Toast.LENGTH_SHORT).show()
+                                                }
                                             },
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Simpan", style = MaterialTheme.typography.labelSmall)
+                                            Text("Simpan ke Cloud", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
 
@@ -688,6 +714,25 @@ fun SuperAdminDashboardScreen(
                         }
                     }
                 }
+            }
+
+            // Footer Copyright
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Copyright @ PernahID",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }

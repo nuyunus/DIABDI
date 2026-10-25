@@ -3,7 +3,11 @@ package com.example.data.remote
 import android.content.Context
 import android.util.Log
 import com.example.data.model.AttendanceRecord
+import com.example.data.model.AttendanceSession
+import com.example.data.model.AttendanceSessionSetting
+import com.example.data.model.CloudSettingsPayload
 import com.example.data.model.Student
+import com.example.data.model.UnitSchedule
 import com.example.data.model.UserAccount
 import com.example.data.model.UserRole
 import kotlinx.coroutines.Dispatchers
@@ -58,11 +62,13 @@ class GoogleSheetsSyncService(private val context: Context) {
 
     fun getScriptUrl(): String {
         val stored = prefs.getString(KEY_SCRIPT_URL, "") ?: ""
-        // Normalisasi URL
         val normalized = normalizeScriptUrl(stored)
         
-        // Jika hasil simpanan kosong, rusak, atau bukan URL http(s), otomatis pakai DEFAULT_SCRIPT_URL
-        return if (normalized.isBlank() || !normalized.startsWith("http")) {
+        return if (normalized.isBlank() || !normalized.startsWith("http") ||
+            normalized.contains("AKfycbzeZgTjLvqyAg47_FKfDJSAX4l4Iru1Cn8C39VLMSGD4o8OEfFHVy_oJjCAvWOO-dOTig") ||
+            normalized.contains("AKfycbywX7IsV3soATniXGCDkq36omIhUdy2mTZZkCIJoTbZJkhr-XDYRvsDksY5UJB3Jv0plQ")
+        ) {
+            prefs.edit().putString(KEY_SCRIPT_URL, DEFAULT_SCRIPT_URL).apply()
             DEFAULT_SCRIPT_URL
         } else {
             normalized
@@ -455,8 +461,8 @@ class GoogleSheetsSyncService(private val context: Context) {
                     password = password.trim(),
                     displayName = userObj.optString("displayName", userObj.optString("name", username.trim())),
                     role = role,
-                    unitPendidikan = userObj.optString("unitPendidikan", userObj.optString("unit", null)).takeIf { !it.isNullOrBlank() },
-                    studentId = userObj.optString("studentId", if (role == UserRole.WALI_SANTRI) username.trim() else null).takeIf { !it.isNullOrBlank() }
+                    unitPendidikan = userObj.optString("unitPendidikan", userObj.optString("unit", "")).takeIf { it.isNotBlank() },
+                    studentId = userObj.optString("studentId", if (role == UserRole.WALI_SANTRI) username.trim() else "").takeIf { it.isNotBlank() }
                 )
                 Result.success(user)
             } else {
@@ -596,7 +602,9 @@ class GoogleSheetsSyncService(private val context: Context) {
             val encDorm = java.net.URLEncoder.encode(record.dormitory, "UTF-8")
             val encSession = java.net.URLEncoder.encode(record.sessionName, "UTF-8")
             val encDate = java.net.URLEncoder.encode(record.date, "UTF-8")
-            val encTime = java.net.URLEncoder.encode(record.time, "UTF-8")
+            // Pastikan format jam menggunakan titik (HH.mm) misal 07.20 sesuai permintaan
+            val formattedTime = record.time.replace(":", ".")
+            val encTime = java.net.URLEncoder.encode(formattedTime, "UTF-8")
             val encStatus = java.net.URLEncoder.encode(record.status, "UTF-8")
             val encBy = java.net.URLEncoder.encode(record.scannedBy, "UTF-8")
             val encNotes = java.net.URLEncoder.encode(record.notes, "UTF-8")
@@ -613,7 +621,7 @@ class GoogleSheetsSyncService(private val context: Context) {
                 put("dormitory", record.dormitory)
                 put("session", record.sessionName)
                 put("date", record.date)
-                put("time", record.time)
+                put("time", formattedTime)
                 put("status", record.status)
                 put("scannedBy", record.scannedBy)
                 put("notes", record.notes)
@@ -649,8 +657,147 @@ class GoogleSheetsSyncService(private val context: Context) {
         }
     }
 
+    /**
+     * Mengambil data pengaturan waktu masuk sekolah & sholat dari sheet 'Settings' di Google Spreadsheet.
+     * Mengembalikan list UnitSchedule dan list AttendanceSessionSetting yang dikonfigurasi Super Admin.
+     */
+    suspend fun fetchSettings(): Result<CloudSettingsPayload> = withContext(Dispatchers.IO) {
+        val scriptUrl = getScriptUrl()
+        if (scriptUrl.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("URL Google Apps Script belum diisi."))
+        }
+        try {
+            val separator = if (scriptUrl.contains("?")) "&" else "?"
+            val fullUrl = "$scriptUrl${separator}action=getSettings"
+            val request = Request.Builder()
+                .url(fullUrl)
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val resStr = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(IllegalStateException("HTTP ${response.code}: $resStr"))
+            }
+
+            val json = JSONObject(resStr)
+            val status = json.optString("status", "")
+            if (!status.equals("success", ignoreCase = true) && !json.optBoolean("success", false)) {
+                val msg = json.optString("message", "Gagal memuat pengaturan dari sheet Settings.")
+                return@withContext Result.failure(IllegalStateException(msg))
+            }
+
+            val unitArr = json.optJSONArray("unitSchedules") ?: JSONArray()
+            val parsedUnits = mutableListOf<UnitSchedule>()
+            for (i in 0 until unitArr.length()) {
+                val uObj = unitArr.optJSONObject(i) ?: continue
+                val unit = uObj.optString("unit", "").trim()
+                val masukStart = uObj.optString("masukStart", "06:30").trim()
+                val masukEnd = uObj.optString("masukEnd", "07:00").trim()
+                val tol = uObj.optInt("toleransiMenit", 10)
+                val info = uObj.optString("info", "")
+                if (unit.isNotBlank()) {
+                    parsedUnits.add(UnitSchedule(unit, masukStart, masukEnd, tol, info))
+                }
+            }
+
+            val sessArr = json.optJSONArray("sessions") ?: JSONArray()
+            val parsedSessions = mutableListOf<AttendanceSessionSetting>()
+            for (i in 0 until sessArr.length()) {
+                val sObj = sessArr.optJSONObject(i) ?: continue
+                val name = sObj.optString("name", "").trim()
+                val start = sObj.optString("start", "").trim()
+                val end = sObj.optString("end", "").trim()
+                val tol = sObj.optInt("toleransi", 0)
+                val ket = sObj.optString("keterangan", "")
+                if (name.isNotBlank()) {
+                    parsedSessions.add(AttendanceSessionSetting(name, start, end, tol, ket))
+                }
+            }
+
+            Result.success(
+                CloudSettingsPayload(
+                    unitSchedules = if (parsedUnits.isNotEmpty()) parsedUnits else AttendanceSession.DEFAULT_UNIT_SCHEDULES,
+                    sessions = parsedSessions
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Menyimpan data pengaturan waktu ke sheet 'Settings' di Google Spreadsheet melalui doPost action=saveSettings.
+     */
+    suspend fun saveSettingsToCloud(
+        unitSchedules: List<UnitSchedule>,
+        sessions: List<AttendanceSessionSetting> = emptyList()
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val scriptUrl = getScriptUrl()
+        if (scriptUrl.isBlank()) {
+            return@withContext Pair(false, "URL Google Apps Script belum diisi.")
+        }
+        try {
+            val json = JSONObject().apply {
+                put("action", "saveSettings")
+                val uArr = JSONArray()
+                for (u in unitSchedules) {
+                    val uObj = JSONObject().apply {
+                        put("unit", u.unit)
+                        put("masukStart", u.masukStart)
+                        put("masukEnd", u.masukEnd)
+                        put("toleransiMenit", u.toleransiMenit)
+                        put("info", u.info)
+                    }
+                    uArr.put(uObj)
+                }
+                put("unitSchedules", uArr)
+
+                val sArr = JSONArray()
+                for (s in sessions) {
+                    val sObj = JSONObject().apply {
+                        put("name", s.name)
+                        put("start", s.start)
+                        put("end", s.end)
+                        put("toleransi", s.toleransi)
+                        put("keterangan", s.keterangan)
+                    }
+                    sArr.put(sObj)
+                }
+                put("sessions", sArr)
+            }
+
+            val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder()
+                .url(scriptUrl)
+                .post(body)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val resStr = response.body?.string() ?: ""
+
+            if (response.isSuccessful) {
+                val resJson = try { JSONObject(resStr) } catch (_: Exception) { null }
+                val status = resJson?.optString("status", "") ?: ""
+                val msg = resJson?.optString("message", "Pengaturan waktu berhasil disimpan ke sheet Settings!")
+                    ?: "Pengaturan berhasil disimpan!"
+                if (status.equals("success", ignoreCase = true) || resJson?.optBoolean("success", false) == true) {
+                    Pair(true, msg)
+                } else {
+                    Pair(false, msg)
+                }
+            } else {
+                Pair(false, "HTTP ${response.code}: $resStr")
+            }
+        } catch (e: Exception) {
+            Pair(false, "Gagal koneksi: ${e.localizedMessage ?: e.javaClass.simpleName}")
+        }
+    }
+
     companion object {
         const val KEY_SCRIPT_URL = "google_apps_script_url"
         const val DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwHswyueVqCsXmSwQnEWRzo39BxabGXeA5j4i1phEwUPz2br6dVhChzasLOHqpRxm57hA/exec"
+        const val VERCEL_WEB_APP_URL = "https://absen-c10mg37up-pernahngodings-projects.vercel.app/"
     }
 }

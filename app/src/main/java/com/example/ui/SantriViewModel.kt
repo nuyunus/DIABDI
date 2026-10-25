@@ -44,16 +44,37 @@ class SantriViewModel(
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     val todayDateString: String = dateFormat.format(Date())
 
-    // Authentication State
-    private val _currentUser = MutableStateFlow<UserAccount?>(null)
+    // Authentication State (Tersimpan permanen sampai user menekan tombol Logout)
+    private val _currentUser = MutableStateFlow<UserAccount?>(repository.getLoggedInUser())
     val currentUser: StateFlow<UserAccount?> = _currentUser.asStateFlow()
+
+    init {
+        val savedUser = repository.getLoggedInUser()
+        if (savedUser != null) {
+            if (savedUser.role == UserRole.WALI_SANTRI && savedUser.studentId != null) {
+                viewModelScope.launch {
+                    val student = repository.findStudentByQrId(savedUser.studentId)
+                    _parentChildStudent.value = student
+                    _selectedStudentForAi.value = student
+                }
+            }
+        }
+        // Auto pull update data di background
+        viewModelScope.launch {
+            try {
+                repository.pullStudentsFromSheets()
+            } catch (_: Exception) {}
+            try {
+                repository.pullUsersFromSheets()
+            } catch (_: Exception) {}
+            try {
+                syncSettingsFromCloud()
+            } catch (_: Exception) {}
+        }
+    }
 
     private val _currentSession = MutableStateFlow(AttendanceSession.defaultSession())
     val currentSession: StateFlow<AttendanceSession> = _currentSession.asStateFlow()
-
-    // Time lock bypass toggle (for testing/demo outside real prayer hours)
-    private val _isTimeLockBypassed = MutableStateFlow(false)
-    val isTimeLockBypassed: StateFlow<Boolean> = _isTimeLockBypassed.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -68,10 +89,19 @@ class SantriViewModel(
         return _unitSchedules.value.find { it.unit.equals(unit, ignoreCase = true) }
     }
 
-    // Check if selected session is currently active
+    // Check if selected session is currently active (Otomatis terkunci jika melewati waktu yang ditentukan)
     fun isCurrentSessionActive(): Boolean {
+        val session = _currentSession.value
         val schedule = getCurrentTeacherUnitSchedule()
-        return _currentSession.value.isCurrentlyActive(schedule, _isTimeLockBypassed.value)
+        return session.isCurrentlyActive(schedule, ignoreTimeLock = false)
+    }
+
+    fun autoSelectActiveSession() {
+        val schedule = getCurrentTeacherUnitSchedule()
+        val active = AttendanceSession.findActiveSession(schedule)
+        if (active != null) {
+            _currentSession.value = active
+        }
     }
 
     // Students list (Strictly filtered by Teacher's Unit if logged in as Guru!)
@@ -177,6 +207,7 @@ class SantriViewModel(
 
     fun login(account: UserAccount) {
         _currentUser.value = account
+        repository.saveLoggedInUser(account)
         if (account.role == UserRole.WALI_SANTRI && account.studentId != null) {
             viewModelScope.launch {
                 val student = repository.findStudentByQrId(account.studentId)
@@ -187,88 +218,136 @@ class SantriViewModel(
     }
 
     fun loginWithCredentials(
-    usernameInput: String,
-    passwordInput: String,
-    onResult: (Boolean, String?) -> Unit
-) {
-    val u = usernameInput.trim()
-    val p = passwordInput.trim()
+        usernameInput: String,
+        passwordInput: String,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val u = usernameInput.trim()
+        val p = passwordInput.trim()
 
-    if (u.isBlank()) {
-        onResult(false, "Masukkan Username/Email.")
-        return
-    }
+        if (u.isBlank()) {
+            onResult(false, "Masukkan Username atau ID Santri.")
+            return
+        }
 
-    viewModelScope.launch {
-        _isLoggingIn.value = true
-        try {
-            // 1. CEK AKUN DEFAULT / SUPER ADMIN BAWAAN
-            val defaultMatch = UserAccount.DEFAULT_ACCOUNTS.find { acc ->
-                acc.username.equals(u, ignoreCase = true) &&
-                (acc.password == p || (acc.role == UserRole.SUPER_ADMIN && (p == "admin" || p == "123" || p == "admin123")))
-            }
-            if (defaultMatch != null) {
-                login(defaultMatch)
-                _isLoggingIn.value = false
-                onResult(true, null)
-                return@launch
-            }
-
-            // 2. CEK CACHE LOKAL (Jika akun Guru/Admin pernah di-pull dari Sheets)
-            val cachedMatch = repository.getCachedUsers().find { acc ->
-                acc.username.equals(u, ignoreCase = true) && acc.password == p
-            }
-            if (cachedMatch != null) {
-                login(cachedMatch)
-                _isLoggingIn.value = false
-                onResult(true, null)
-                return@launch
-            }
-
-            // 3. CEK ONLINE KE GOOGLE SHEETS (LOGIN KELUAR/MASUK VIA APPS SCRIPT)
-            val scriptUrl = repository.sheetsService.getScriptUrl()
-            if (scriptUrl.isNotBlank() && scriptUrl.startsWith("http")) {
-                val onlineResult = repository.sheetsService.loginOnline(u, p)
-                if (onlineResult.isSuccess) {
-                    val user = onlineResult.getOrThrow()
-                    login(user)
+        viewModelScope.launch {
+            _isLoggingIn.value = true
+            try {
+                // 1. CEK AKUN DEFAULT / SUPER ADMIN BAWAAN
+                val defaultMatch = UserAccount.DEFAULT_ACCOUNTS.find { acc ->
+                    acc.username.equals(u, ignoreCase = true) &&
+                    (acc.password == p || (acc.role == UserRole.SUPER_ADMIN && (p == "admin" || p == "123" || p == "admin123")))
+                }
+                if (defaultMatch != null) {
+                    login(defaultMatch)
                     _isLoggingIn.value = false
                     onResult(true, null)
                     return@launch
-                } else {
-                    val err = onlineResult.exceptionOrNull()?.message ?: ""
-                    if (err.contains("Username atau Password salah", ignoreCase = true)) {
+                }
+
+                // 2. CEK CACHE LOKAL USERS (Guru/Admin yang pernah ditarik dari Google Sheets)
+                val cachedMatch = repository.getCachedUsers().find { acc ->
+                    acc.username.equals(u, ignoreCase = true) && acc.password == p
+                }
+                if (cachedMatch != null) {
+                    login(cachedMatch)
+                    _isLoggingIn.value = false
+                    onResult(true, null)
+                    return@launch
+                }
+
+                // 3. CEK SANTRI DARI DATABASE LOKAL (ID sebagai Username & NISN sebagai Password)
+                var student = repository.findStudentByIdAndNisn(u, p)
+                if (student == null && repository.getStudentCountDirect() == 0) {
+                    // Jika database lokal masih kosong (baru pertama kali buka aplikasi),
+                    // tarik data siswa langsung dari Google Sheets
+                    try {
+                        repository.pullStudentsFromSheets()
+                        student = repository.findStudentByIdAndNisn(u, p)
+                    } catch (_: Exception) {}
+                }
+
+                if (student != null) {
+                    val studentAccount = UserAccount(
+                        username = student.id,
+                        password = student.nisn,
+                        displayName = student.name,
+                        role = UserRole.WALI_SANTRI,
+                        studentId = student.id,
+                        unitPendidikan = student.unitPendidikan
+                    )
+                    login(studentAccount)
+                    _isLoggingIn.value = false
+                    onResult(true, null)
+                    return@launch
+                }
+
+                // 4. CEK ONLINE KE GOOGLE SHEETS
+                val scriptUrl = repository.sheetsService.getScriptUrl()
+                if (scriptUrl.isNotBlank() && scriptUrl.startsWith("http")) {
+                    val onlineResult = repository.sheetsService.loginOnline(u, p)
+                    if (onlineResult.isSuccess) {
+                        val user = onlineResult.getOrThrow()
+                        login(user)
                         _isLoggingIn.value = false
-                        onResult(false, "Username atau Password Guru/Admin tidak cocok.")
+                        onResult(true, null)
                         return@launch
+                    } else {
+                        val err = onlineResult.exceptionOrNull()?.message ?: ""
+                        if (err.contains("Username atau Password salah", ignoreCase = true)) {
+                            _isLoggingIn.value = false
+                            onResult(false, "Username atau Password tidak cocok.")
+                            return@launch
+                        }
                     }
                 }
-            }
 
-            // 4. JIKA TIDAK DITEMUKAN
-            _isLoggingIn.value = false
-            onResult(
-                false,
-                "Akun Guru/Admin tidak ditemukan. Pastikan akun terdaftar di sheet 'Users' Google Sheets dan HP terhubung internet."
-            )
-        } catch (e: Exception) {
-            _isLoggingIn.value = false
-            onResult(false, "Terjadi kesalahan: ${e.localizedMessage ?: "Gagal memproses login"}")
+                // 5. Cek ulang santri lokal jika sebelumnya database baru ditarik
+                val refreshedStudent = repository.findStudentByIdAndNisn(u, p)
+                if (refreshedStudent != null) {
+                    val studentAccount = UserAccount(
+                        username = refreshedStudent.id,
+                        password = refreshedStudent.nisn,
+                        displayName = refreshedStudent.name,
+                        role = UserRole.WALI_SANTRI,
+                        studentId = refreshedStudent.id,
+                        unitPendidikan = refreshedStudent.unitPendidikan
+                    )
+                    login(studentAccount)
+                    _isLoggingIn.value = false
+                    onResult(true, null)
+                    return@launch
+                }
+
+                // 6. Cek jika ID santri ada tetapi NISN salah
+                val studentById = repository.findStudentByQrId(u)
+                if (studentById != null) {
+                    _isLoggingIn.value = false
+                    onResult(false, "ID Santri '${studentById.name}' ditemukan, namun NISN (kata sandi) salah.")
+                    return@launch
+                }
+
+                _isLoggingIn.value = false
+                onResult(
+                    false,
+                    "Akun tidak ditemukan atau kata sandi salah. Silakan periksa kembali."
+                )
+            } catch (e: Exception) {
+                _isLoggingIn.value = false
+                onResult(false, "Terjadi kesalahan: ${e.localizedMessage ?: "Gagal memproses login"}")
+            }
         }
     }
-}
+
     fun logout() {
         _currentUser.value = null
+        repository.clearLoggedInUser()
         _scanFeedback.value = null
         _parentChildStudent.value = null
     }
 
     fun selectSession(session: AttendanceSession) {
         _currentSession.value = session
-    }
-
-    fun toggleTimeLockBypass() {
-        _isTimeLockBypassed.value = !_isTimeLockBypassed.value
     }
 
     fun updateSearchQuery(query: String) {
@@ -279,10 +358,14 @@ class SantriViewModel(
         _scanFeedback.value = null
     }
 
+    fun clearScanFeedback() {
+        _scanFeedback.value = null
+    }
+
     /**
      * Scan QR: Diproses murni berdasarkan ID santri.
      * Menerapkan validasi:
-     * 1. Sesi terkunci jika di luar jam sesi
+     * 1. Waktu absensi otomatis terkunci jika melewati waktu yang telah ditentukan (hanya bisa absen di waktu tersebut)
      * 2. Guru hanya boleh mengabsen santri di unit pendidikan guru tersebut (tidak bisa lintas unit)
      */
     fun processBarcode(rawId: String, status: String = "Hadir") {
@@ -291,11 +374,11 @@ class SantriViewModel(
             val session = _currentSession.value
             val unitSchedule = getCurrentTeacherUnitSchedule()
 
-            // 1. Cek Apakah Sesi Sedang Terkunci
-            if (!session.isCurrentlyActive(unitSchedule, _isTimeLockBypassed.value)) {
+            // 1. Waktu absensi otomatis terkunci jika melewati waktu yang telah ditentukan
+            if (!session.isCurrentlyActive(unitSchedule, ignoreTimeLock = false)) {
                 val timeRange = session.getEffectiveTimeRange(unitSchedule)
                 _scanFeedback.value = ScanFeedback.SessionLocked(
-                    "Sesi ${session.name} saat ini TERKUNCI.\nJam aktif: $timeRange. Absensi hanya dapat dicatat saat jam sesi dibuka.",
+                    "WAKTU ABSEN TERKUNCI!\nSesi ${session.name} hanya dibuka pada rentang waktu $timeRange. Santri hanya bisa absen pada waktu tersebut.",
                     session
                 )
                 return@launch
@@ -333,6 +416,51 @@ class SantriViewModel(
             }.onFailure { error ->
                 _scanFeedback.value = ScanFeedback.AlreadyRecorded(error.message ?: "Sudah tercatat", student)
             }
+        }
+    }
+
+    private val _isRecordingBulk = MutableStateFlow(false)
+    val isRecordingBulk: StateFlow<Boolean> = _isRecordingBulk.asStateFlow()
+
+    private val _bulkRecordResult = MutableStateFlow<String?>(null)
+    val bulkRecordResult: StateFlow<String?> = _bulkRecordResult.asStateFlow()
+
+    fun clearBulkRecordResult() {
+        _bulkRecordResult.value = null
+    }
+
+    fun recordBulkManualAttendance(
+        students: List<Student>,
+        session: AttendanceSession,
+        status: String,
+        notes: String,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        if (students.isEmpty()) {
+            onComplete(false, "Pilih setidaknya 1 santri untuk diabsen.")
+            return
+        }
+
+        viewModelScope.launch {
+            _isRecordingBulk.value = true
+            val user = _currentUser.value
+            val scannedBy = user?.displayName ?: "Guru Piket"
+
+            val (successCount, failCount, messages) = repository.recordBulkManualAttendance(
+                students = students,
+                session = session,
+                status = status,
+                notes = notes,
+                scannedBy = scannedBy
+            )
+            _isRecordingBulk.value = false
+            val msg = if (failCount == 0) {
+                "Berhasil mencatat $successCount santri ($status) untuk sesi ${session.name}!"
+            } else {
+                "Tercatat $successCount santri, $failCount gagal: ${messages.take(2).joinToString(", ")}"
+            }
+            _bulkRecordResult.value = msg
+            onComplete(successCount > 0, msg)
         }
     }
 
@@ -388,7 +516,44 @@ class SantriViewModel(
         }
     }
 
-    fun updateUnitSchedule(unit: String, masukStart: String, masukEnd: String, toleransi: Int) {
+    private val _isSettingsSyncing = MutableStateFlow(false)
+    val isSettingsSyncing: StateFlow<Boolean> = _isSettingsSyncing.asStateFlow()
+
+    private val _settingsSyncResult = MutableStateFlow<String?>(null)
+    val settingsSyncResult: StateFlow<String?> = _settingsSyncResult.asStateFlow()
+
+    fun syncSettingsFromCloud(onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isSettingsSyncing.value = true
+            val result = repository.fetchSettingsFromCloud()
+            _isSettingsSyncing.value = false
+            result.onSuccess { payload ->
+                if (payload.unitSchedules.isNotEmpty()) {
+                    _unitSchedules.value = payload.unitSchedules
+                    repository.saveUnitSchedules(payload.unitSchedules)
+                }
+                if (payload.sessions.isNotEmpty()) {
+                    repository.saveSessionSettings(payload.sessions)
+                }
+                autoSelectActiveSession()
+                val msg = "Jadwal berhasil disinkronkan dari sheet Settings Google Sheets!"
+                _settingsSyncResult.value = msg
+                onComplete?.invoke(true, msg)
+            }.onFailure { err ->
+                val msg = err.message ?: "Gagal memuat jadwal dari sheet Settings"
+                _settingsSyncResult.value = msg
+                onComplete?.invoke(false, msg)
+            }
+        }
+    }
+
+    fun updateUnitSchedule(
+        unit: String,
+        masukStart: String,
+        masukEnd: String,
+        toleransi: Int,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
         val current = _unitSchedules.value.toMutableList()
         val index = current.indexOfFirst { it.unit.equals(unit, ignoreCase = true) }
         val updated = UnitSchedule(
@@ -409,6 +574,12 @@ class SantriViewModel(
         }
         _unitSchedules.value = current
         repository.saveUnitSchedules(current)
+
+        // Simpan langsung ke sheet Settings di Google Sheets agar tersinkronisasi terpusat
+        viewModelScope.launch {
+            val (success, msg) = repository.saveSettingsToCloud(current)
+            onComplete?.invoke(success, msg)
+        }
     }
 
     fun selectStudentForAi(student: Student?) {

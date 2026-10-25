@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -100,23 +101,25 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Hero Branding
+        // App Hero Branding with Official Pondok Pesantren Modern Sahid Logo
         item {
             Box(
                 modifier = Modifier
-                    .size(76.dp)
+                    .size(92.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
+                    .background(Color.White)
+                    .border(2.dp, Color(0xFFE2E8F0), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.School,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(42.dp)
+                Image(
+                    painter = painterResource(id = com.example.R.drawable.ic_logo_pesantren),
+                    contentDescription = "Logo Pondok Pesantren Modern Sahid",
+                    modifier = Modifier
+                        .size(86.dp)
+                        .clip(CircleShape)
                 )
             }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "DIABDI",
                 style = MaterialTheme.typography.headlineMedium.copy(
@@ -126,11 +129,16 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
+                text = "Pondok Pesantren Modern Sahid",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
                 text = "Digitalisasi Informasi Absensi Berbasis Data Indeks",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("MTs", "MA", "SMK").forEach { unit ->
                     Surface(
@@ -146,7 +154,7 @@ fun LoginScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
 
         // Single Form Login Card
